@@ -1,0 +1,19 @@
+{
+  "rules": {
+    "rooms": {
+      "$code": {
+        ".read": true,
+        ".write": true,
+        "players": {
+          "$playerId": {
+            ".write": true
+          }
+        }
+      }
+    },
+    "_ids": {
+      ".read": false,
+      ".write": true
+    }
+  }
+}
