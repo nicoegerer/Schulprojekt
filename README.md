@@ -1,18 +1,51 @@
-# React + Vite
+# Reaction Test
 
-This template provides a minimal setup to get React working in Vite with HMR and some ESLint rules.
+Ein kleines Browser-Spiel mit React, Vite und Tailwind CSS.
 
-Currently, two official plugins are available:
+Dieses Projekt entsteht im Rahmen einer Mini-Schulung für die Schule zum Thema:
 
-- [@vitejs/plugin-react](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react) uses [Oxc](https://oxc.rs)
-- [@vitejs/plugin-react-swc](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react-swc) uses [SWC](https://swc.rs/)
+- Vite
+- React
+- Tailwind CSS
 
-## React Compiler
+Die Schulung wird von Harun & Nico vorbereitet und vorgestellt.  
+Ziel ist es, moderne Frontend-Technologien praktisch zu zeigen und gemeinsam ein kleines Webprojekt zu entwickeln.
 
-The React Compiler is not enabled on this template because of its impact on dev & build performances. To add it, see [this documentation](https://react.dev/learn/react-compiler/installation).
+---
 
-## Expanding the ESLint configuration
+## Projektidee
 
-If you are developing a production application, we recommend using TypeScript with type-aware lint rules enabled. Check out the [TS template](https://github.com/vitejs/vite/tree/main/packages/create-vite/template-react-ts) for information on how to integrate TypeScript and [`typescript-eslint`](https://typescript-eslint.io) in your project.
+Der Spieler startet das Spiel und wartet darauf, dass sich die Farbe des Spielfelds ändert.  
+Sobald das Feld grün wird, muss so schnell wie möglich geklickt werden.
 
-Harun is the best
+Die Reaktionszeit wird gemessen und anschließend angezeigt.
+
+---
+
+## Technologien
+
+Dieses Projekt verwendet:
+
+- React
+- Vite
+- Tailwind CSS
+
+---
+
+## Ziel der Mini-Schulung
+
+In unserer Schulung möchten wir zeigen:
+
+- Was Vite ist
+- Wie React funktioniert
+- Wie Tailwind CSS verwendet wird
+
+---
+
+## Arbeitsauftrag für die Klasse
+
+Nach der Vorstellung bearbeiten die Mitschüler einen kleinen Arbeitsauftrag.
+
+Geplante Aufgabe:
+
+- Einen Highscore zum Reaction Test hinzufügen
