@@ -12,14 +12,19 @@ export function generateRoomCode() {
   return Array.from({ length: 4 }, () => chars[Math.floor(Math.random() * chars.length)]).join('')
 }
 
-// Raum erstellen – gibt den Raumcode zurück
-export async function createRoom(playerName) {
+// Raum erstellen
+// totalRounds: wie viele Runden gespielt werden
+// winMode: 'fastest' (schnellste Einzelrunde) | 'average' (bester Durchschnitt)
+export async function createRoom(playerName, totalRounds, winMode) {
   const code = generateRoomCode()
   const playerId = push(ref(db, '_ids')).key
 
   await set(ref(db, `rooms/${code}`), {
     host: playerId,
-    state: 'lobby',      // lobby | countdown | waiting | ready | results
+    state: 'lobby',
+    currentRound: 0,
+    totalRounds,
+    winMode,
     createdAt: serverTimestamp(),
     players: {
       [playerId]: {
@@ -28,6 +33,7 @@ export async function createRoom(playerName) {
         reactionTime: null,
         tooEarly: false,
         joinedAt: serverTimestamp(),
+        rounds: {},
       }
     }
   })
@@ -35,7 +41,7 @@ export async function createRoom(playerName) {
   return { code, playerId }
 }
 
-// Raum beitreten – gibt playerId zurück oder wirft Fehler
+// Raum beitreten
 export async function joinRoom(code, playerName) {
   const roomRef = ref(db, `rooms/${code}`)
   const snapshot = await get(roomRef)
@@ -56,21 +62,35 @@ export async function joinRoom(code, playerName) {
     reactionTime: null,
     tooEarly: false,
     joinedAt: serverTimestamp(),
+    rounds: {},
   })
 
   return playerId
 }
 
-// Host startet Countdown → Spiel beginnt für alle
-export async function startGame(code) {
-  // Phase 1: Countdown (3 Sekunden UI-seitig)
-  await update(ref(db, `rooms/${code}`), { state: 'countdown' })
+// Host startet eine Runde
+export async function startGame(code, roundNumber) {
+  const snapshot = await get(ref(db, `rooms/${code}/players`))
+  const updates = {}
 
-  // Phase 2: Nach 3s → alle warten auf grünes Signal
+  // Runden-Ergebnisse zurücksetzen, aber rounds-History behalten
+  if (snapshot.exists()) {
+    Object.keys(snapshot.val()).forEach(id => {
+      updates[`rooms/${code}/players/${id}/ready`] = false
+      updates[`rooms/${code}/players/${id}/reactionTime`] = null
+      updates[`rooms/${code}/players/${id}/tooEarly`] = false
+    })
+  }
+
+  updates[`rooms/${code}/state`] = 'countdown'
+  updates[`rooms/${code}/currentRound`] = roundNumber
+  await update(ref(db), updates)
+
+  // Nach 3s Countdown → warten
   setTimeout(async () => {
     await update(ref(db, `rooms/${code}`), { state: 'waiting' })
 
-    // Phase 3: Zufällige Verzögerung 2–5s → grünes Signal
+    // Zufällige Verzögerung 2–5s → grünes Signal
     const delay = Math.random() * 3000 + 2000
     setTimeout(async () => {
       await update(ref(db, `rooms/${code}`), {
@@ -81,27 +101,46 @@ export async function startGame(code) {
   }, 3000)
 }
 
-// Spieler schickt sein Ergebnis (Reaktionszeit oder tooEarly)
-export async function submitResult(code, playerId, reactionTime, tooEarly = false) {
-  await update(ref(db, `rooms/${code}/players/${playerId}`), {
-    reactionTime: tooEarly ? null : reactionTime,
-    tooEarly,
-    ready: true,
-  })
+// Spieler schickt sein Ergebnis.
+// Wenn ALLE fertig sind → State auf 'results' setzen (Bug-Fix: serverseitig geprüft)
+export async function submitResult(code, playerId, reactionTime, tooEarly, currentRound) {
+  const updates = {}
+
+  updates[`rooms/${code}/players/${playerId}/reactionTime`] = tooEarly ? null : reactionTime
+  updates[`rooms/${code}/players/${playerId}/tooEarly`] = tooEarly
+  updates[`rooms/${code}/players/${playerId}/ready`] = true
+
+  // Rundenzeit in der rounds-Map speichern (für Durchschnitt)
+  if (!tooEarly && reactionTime != null) {
+    updates[`rooms/${code}/players/${playerId}/rounds/${currentRound}`] = reactionTime
+  }
+
+  await update(ref(db), updates)
+
+  // Nach dem Schreiben: prüfen ob alle ready → dann results
+  const snapshot = await get(ref(db, `rooms/${code}/players`))
+  if (!snapshot.exists()) return
+
+  const allDone = Object.values(snapshot.val()).every(p => p.ready === true)
+  if (allDone) {
+    await update(ref(db, `rooms/${code}`), { state: 'results' })
+  }
 }
 
-// Host setzt Spiel auf Lobby zurück für nächste Runde
-export async function resetRoom(code) {
+// Spiel komplett beenden → zurück zur Lobby (Host wählt neue Einstellungen)
+export async function endGame(code) {
   const snapshot = await get(ref(db, `rooms/${code}/players`))
   if (!snapshot.exists()) return
 
   const updates = {}
   Object.keys(snapshot.val()).forEach(id => {
+    updates[`rooms/${code}/players/${id}/ready`] = false
     updates[`rooms/${code}/players/${id}/reactionTime`] = null
     updates[`rooms/${code}/players/${id}/tooEarly`] = false
-    updates[`rooms/${code}/players/${id}/ready`] = false
+    updates[`rooms/${code}/players/${id}/rounds`] = {}
   })
   updates[`rooms/${code}/state`] = 'lobby'
+  updates[`rooms/${code}/currentRound`] = 0
   updates[`rooms/${code}/readyAt`] = null
 
   await update(ref(db), updates)
@@ -115,9 +154,35 @@ export async function leaveRoom(code, playerId) {
 // Echtzeit-Listener auf einen Raum
 export function listenToRoom(code, callback) {
   const roomRef = ref(db, `rooms/${code}`)
-  onValue(roomRef, (snapshot) => {
+  onValue(roomRef, snapshot => {
     callback(snapshot.exists() ? snapshot.val() : null)
   })
-  // Gibt Cleanup-Funktion zurück
   return () => off(roomRef)
+}
+
+// ── Hilfsfunktionen für Auswertung ──────────────────────────────────────────
+
+// Durchschnitt aller Rundenzeiten eines Spielers
+export function getAverage(player) {
+  const times = Object.values(player.rounds || {}).filter(t => t != null)
+  if (times.length === 0) return null
+  return Math.round(times.reduce((a, b) => a + b, 0) / times.length)
+}
+
+// Beste Einzelzeit eines Spielers
+export function getBestRound(player) {
+  const times = Object.values(player.rounds || {}).filter(t => t != null)
+  if (times.length === 0) return null
+  return Math.min(...times)
+}
+
+// Spieler nach Gewinnmodus sortieren
+export function sortPlayers(players, winMode) {
+  return [...players].sort((a, b) => {
+    const aVal = winMode === 'average' ? getAverage(a) : getBestRound(a)
+    const bVal = winMode === 'average' ? getAverage(b) : getBestRound(b)
+    if (aVal == null) return 1
+    if (bVal == null) return -1
+    return aVal - bVal
+  })
 }
